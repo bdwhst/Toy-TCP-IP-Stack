@@ -1,5 +1,5 @@
 #include "tcp_sender.hh"
-
+#include <iostream>
 #include "tcp_config.hh"
 
 #include <random>
@@ -15,7 +15,8 @@ TCPSender::TCPSender(const size_t capacity, const uint16_t retx_timeout, const s
     : _isn(fixed_isn.value_or(WrappingInt32{random_device()()}))
     , _initial_retransmission_timeout{retx_timeout}
     , _curr_retransmission_timeout(retx_timeout)
-    , _stream(capacity) { }
+    , _stream(capacity)
+    , _timer(retx_timeout) { }
 
 uint64_t TCPSender::bytes_in_flight() const { 
     size_t count=0;
@@ -28,6 +29,7 @@ uint64_t TCPSender::bytes_in_flight() const {
 
 //Send a non-empty segment(non-empty in sequence space)
 void TCPSender::send_a_segment(uint16_t window_size) {
+    //std::cout<<"Sending a segment"<<std::endl;
     //If window_size is 0 or the sender finished sending, do nothing
     if(!window_size||_sender_finished)
         return;
@@ -38,9 +40,8 @@ void TCPSender::send_a_segment(uint16_t window_size) {
         //modify the segment to send
         new_seg.header().seqno=wrap(0, _isn);
         new_seg.header().syn=true;
-        new_seg.payload()=_stream.read(window_size-1);
-        _next_seqno+=new_seg.payload().size()+1;
-        _sender_win_size-=new_seg.payload().size()+1;
+        _next_seqno+=1;
+        _sender_win_size-=1;
     }
     else
     {
@@ -58,7 +59,7 @@ void TCPSender::send_a_segment(uint16_t window_size) {
     //because we can't know if the input stream is ended untill we actually read to EOF
     //Under such circumstances, the window_size (equals to MAX_PAYLOAD_SIZE) may be used up
     //But we can still append a fin byte in sequence space
-    if(_stream.eof()&&_sender_win_size>0)
+    if(_stream.eof()&&_sender_win_size)
     {
         //add fin flag
         new_seg.header().fin=true;
@@ -70,8 +71,8 @@ void TCPSender::send_a_segment(uint16_t window_size) {
     _segments_out.push(new_seg);
     _segments_in_flight.push_back(new_seg);
     
-    if(!_timer_start)
-        _timer_start=true;
+    if(!_timer.is_started())
+        _timer.restart(_curr_retransmission_timeout);
 }
 
 //Fill the sender window
@@ -88,7 +89,6 @@ void TCPSender::fill_window() {
         while(remaining_win_size>TCPConfig::MAX_PAYLOAD_SIZE)
         {
             uint16_t segment_size=TCPConfig::MAX_PAYLOAD_SIZE;
-            //If this is the first segment to sent, segment size can be 1453(1 syn byte + 1452 payload bytes)
             if(_next_seqno==0)
                 segment_size+=1;
             send_a_segment(segment_size);
@@ -114,14 +114,16 @@ void TCPSender::update_window(const WrappingInt32 ackno, const uint16_t window_s
 void TCPSender::reset_retrans_parameters(bool timer_start)
 {
     _curr_retransmission_timeout=_initial_retransmission_timeout;
-    _time_elapsed=0;
-    _timer_start=timer_start;
+    _timer.restart(_curr_retransmission_timeout);
+    if(!timer_start)
+        _timer.stop();
     _num_consecutive_retrans=0;
 }
 
 //! \param ackno The remote receiver's ackno (acknowledgment number)
 //! \param window_size The remote receiver's advertised window size
 void TCPSender::ack_received(const WrappingInt32 ackno, const uint16_t window_size) { 
+    //std::cout<<"ACK received"<<std::endl;
     //Ignore invalid ack
     if(unwrap(ackno, _isn, _next_seqno)>_next_seqno)
         return;
@@ -161,11 +163,11 @@ void TCPSender::ack_received(const WrappingInt32 ackno, const uint16_t window_si
 //! \param[in] ms_since_last_tick the number of milliseconds since the last call to this method
 void TCPSender::tick(const size_t ms_since_last_tick) { 
     //Ignore if timer hasn't started
-    if(!_timer_start)
+    if(!_timer.is_started())
         return;
-    _time_elapsed+=ms_since_last_tick;
+    _timer.tick(ms_since_last_tick);
     //if timer expired
-    if(_time_elapsed>=_curr_retransmission_timeout)
+    if(_timer.expired())
     {
         //Delete the acked segment from list
         _segments_out.push(_segments_in_flight.front());
@@ -178,7 +180,7 @@ void TCPSender::tick(const size_t ms_since_last_tick) {
             _num_consecutive_retrans++;
             _curr_retransmission_timeout*=2;
         }
-        _time_elapsed=0;
+        _timer.restart(_curr_retransmission_timeout);
     }
 }
 

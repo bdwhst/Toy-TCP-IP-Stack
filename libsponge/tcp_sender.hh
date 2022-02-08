@@ -10,6 +10,29 @@
 #include <queue>
 #include <list>
 
+
+class TCPTimer
+{
+    uint64_t _time_elapsed{0};
+    uint64_t _rto;
+    bool _started{false};
+public:
+    explicit TCPTimer(uint64_t rto):_rto(rto){}
+    void stop() { _started=false; }
+    bool is_started() { return _started; };
+    void tick(const size_t ms_since_last_tick) {
+        if(_started)
+          _time_elapsed+=ms_since_last_tick;
+    }
+    bool expired() { return _time_elapsed>=_rto; }
+    void restart(uint64_t rto) {
+        _started=true;
+        _rto=rto;
+        _time_elapsed=0;
+    }
+};
+
+
 //! \brief The "sender" part of a TCP implementation.
 
 //! Accepts a ByteStream, divides it up into segments and sends the
@@ -39,13 +62,11 @@ class TCPSender {
 
     uint16_t _sender_win_size{1};
 
-    uint64_t _time_elapsed{0};
-
-    bool _timer_start{false};
+    TCPTimer _timer;
 
     bool _sender_finished{false};
 
-    std::list<TCPSegment> _segments_in_flight{};
+    std::deque<TCPSegment> _segments_in_flight{};
 
     unsigned short _num_consecutive_retrans{0};
 
@@ -110,5 +131,7 @@ class TCPSender {
     WrappingInt32 next_seqno() const { return wrap(_next_seqno, _isn); }
     //!@}
 };
+
+
 
 #endif  // SPONGE_LIBSPONGE_TCP_SENDER_HH

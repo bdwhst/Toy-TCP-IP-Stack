@@ -19,8 +19,11 @@ void TCPReceiver::segment_received(const TCPSegment &seg) {
     {
         //reference to number of bytes_written
         //if PREVIOUSLY synced then subtract one from unwrapped seqno (syn will make seqno increment by one)
-        uint64_t stream_index=unwrap(seg.header().seqno, isn, _reassembler.stream_out().bytes_written())-!seg.header().syn;
-        _reassembler.push_substring(seg.payload().copy(), stream_index, seg.header().fin);
+        if(seg.payload().size()!=0||seg.header().fin)
+        {
+            uint64_t stream_index=unwrap(seg.header().seqno, isn, _reassembler.stream_out().bytes_written())-!seg.header().syn;
+            _reassembler.push_substring(seg.payload().copy(), stream_index, seg.header().fin);
+        }
     }
         
     

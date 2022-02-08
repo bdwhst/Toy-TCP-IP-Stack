@@ -12,6 +12,8 @@
 using namespace std;
 
 size_t ByteStream::write(const string &data) {
+    if(eof_flag)
+        return 0;
     size_t count=0;
     while(!is_full()&&(count!=data.length()))
     {

@@ -55,6 +55,7 @@ void StreamReassembler::push_substring(const string &data, const size_t index, c
 //! write to output stream if possible
 void StreamReassembler::write_to_stream()
 {
+    
     if(!reassemble_buffer[0].valid)
     {
         //Deal with the case when a empty string with eof has been pushed in
@@ -67,6 +68,7 @@ void StreamReassembler::write_to_stream()
     while (reassemble_buffer[i].valid&&i<buffer_end_index)
     {
         temp_out+=reassemble_buffer[i].c;
+        reassemble_buffer[i].valid=false;
         i++;
     }
     _output.write(temp_out);
